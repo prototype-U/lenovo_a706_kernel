@@ -1,0 +1,15 @@
+Swap enabled
+Frandom support
+BFQ v7
+XZ compression
+Optimized sha
+Fiops and row added
+Removed uneccesary govs and scheds
+Sioplus andn Smartass2 added
+Quickup ported from moto
+memcopy: Add RAM perfomance tweak
+Added power efficient workqueues 
+Selinux enabled
+Freed up some ram from loggers
+Ram tweaks
+Built using linaro 4.6.2 for optimum performance!
