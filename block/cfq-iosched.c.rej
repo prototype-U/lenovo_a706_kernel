@@ -1,0 +1,12 @@
+--- block/cfq-iosched.c
++++ block/cfq-iosched.c
+@@ -239,6 +239,9 @@
+ 	unsigned long workload_expires;
+ 	struct cfq_group *serving_group;
+ 
++	unsigned int nr_urgent_pending;
++	unsigned int nr_urgent_in_flight;
++
+ 	/*
+ 	 * Each priority tree is sorted by next_request position.  These
+ 	 * trees are used when determining if two or more queues are
