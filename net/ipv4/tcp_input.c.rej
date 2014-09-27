@@ -1,0 +1,15 @@
+--- net/ipv4/tcp_input.c
++++ net/ipv4/tcp_input.c
+@@ -3394,10 +3394,11 @@
+ 		return;
+ 	}
+ 
++	BUG_ON(num_sacks > 4); 
+ 	for (this_sack = 0; this_sack < num_sacks;) {
+ 		
+ 		if (!before(tp->rcv_nxt, sp->start_seq)) {
+-			int i;
++			int i = 0;
+ 
+ 			
+ 			WARN_ON(before(tp->rcv_nxt, sp->end_seq));
