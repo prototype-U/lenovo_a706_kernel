@@ -16,6 +16,13 @@ config MT9T013
 	default y
 	---help---
 	  MICRON 3M Bayer Sensor with AutoFocus
+
+config IMX111
+	bool "Sensor IMX111 (Hacked Sensors Drivers)"
+	depends on MSM_CAMERA && MSM_CAMERA_V4L2
+	---help---
+	Hacked Sensors Drivers Sensor modules with Autofocus	  
+	  
 config MT9D113
 	bool "Sensor mt9d113 (YUV 2M)"
 	depends on MSM_CAMERA && ARCH_MSM8X60 && !MSM_CAMERA_V4L2
