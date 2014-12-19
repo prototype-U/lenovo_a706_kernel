@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -380,6 +380,8 @@ long msm_sensor_subdev_ioctl(struct v4l2_subdev *sd,
 {
 	struct msm_sensor_ctrl_t *s_ctrl = get_sctrl(sd);
 	void __user *argp = (void __user *)arg;
+	if (s_ctrl->sensor_state == MSM_SENSOR_POWER_DOWN)
+		return -EINVAL;
 	switch (cmd) {
 	case VIDIOC_MSM_SENSOR_CFG:
 		return s_ctrl->func_tbl->sensor_config(s_ctrl, argp);
@@ -786,28 +788,8 @@ int32_t msm_sensor_i2c_probe(struct i2c_client *client,
 	else
 		rc = msm_sensor_match_id(s_ctrl);
 	if (rc < 0)
-        {
-         	pr_err("%s: %s match_id failed1  rc=%d\n",__func__,client->name, rc);
-                rc = s_ctrl->func_tbl->sensor_power_down(s_ctrl);
-                if (rc < 0){
-           		pr_err("%s: %s power_down failed\n",__func__,client->name);
-                 }
-               rc = s_ctrl->func_tbl->sensor_power_up(s_ctrl);
-               if (rc < 0) {
-                    pr_err("%s %s power up failed\n", __func__, client->name);
-                    goto probe_fail;
-                }
+		goto probe_fail;
 
-                if (s_ctrl->func_tbl->sensor_match_id)
-                    rc = s_ctrl->func_tbl->sensor_match_id(s_ctrl);
-                else
-                {
-                    rc = msm_sensor_match_id(s_ctrl);
-                    pr_err("%s: %s match_id failed2  return  rc=%d\n",__func__,client->name, rc);
-                }
-                if (rc < 0)
-                    goto probe_fail;
-        }
 	snprintf(s_ctrl->sensor_v4l2_subdev.name,
 		sizeof(s_ctrl->sensor_v4l2_subdev.name), "%s", id->name);
 	v4l2_i2c_subdev_init(&s_ctrl->sensor_v4l2_subdev, client,
@@ -821,6 +803,7 @@ power_down:
 	if (rc > 0)
 		rc = 0;
 	s_ctrl->func_tbl->sensor_power_down(s_ctrl);
+	s_ctrl->sensor_state = MSM_SENSOR_POWER_DOWN;
 	return rc;
 }
 
@@ -830,10 +813,16 @@ int32_t msm_sensor_power(struct v4l2_subdev *sd, int on)
 	struct msm_sensor_ctrl_t *s_ctrl = get_sctrl(sd);
 	mutex_lock(s_ctrl->msm_sensor_mutex);
 	if (on) {
+		if(s_ctrl->sensor_state == MSM_SENSOR_POWER_UP) {
+			pr_err("%s: sensor already in power up state\n", __func__);
+			mutex_unlock(s_ctrl->msm_sensor_mutex);
+			return -EINVAL;
+		}
 		rc = s_ctrl->func_tbl->sensor_power_up(s_ctrl);
 		if (rc < 0) {
 			pr_err("%s: %s power_up failed rc = %d\n", __func__,
 				s_ctrl->sensordata->sensor_name, rc);
+			s_ctrl->sensor_state = MSM_SENSOR_POWER_DOWN;
 		} else {
 			if (s_ctrl->func_tbl->sensor_match_id)
 				rc = s_ctrl->func_tbl->sensor_match_id(s_ctrl);
@@ -848,10 +837,18 @@ int32_t msm_sensor_power(struct v4l2_subdev *sd, int on)
 					pr_err("%s: %s power_down failed\n",
 					__func__,
 					s_ctrl->sensordata->sensor_name);
+				s_ctrl->sensor_state = MSM_SENSOR_POWER_DOWN;
 			}
+			s_ctrl->sensor_state = MSM_SENSOR_POWER_UP;
 		}
 	} else {
+		if(s_ctrl->sensor_state == MSM_SENSOR_POWER_DOWN) {
+			pr_err("%s: sensor already in power down state\n",__func__);
+			mutex_unlock(s_ctrl->msm_sensor_mutex);
+			return -EINVAL;
+		}
 		rc = s_ctrl->func_tbl->sensor_power_down(s_ctrl);
+		s_ctrl->sensor_state = MSM_SENSOR_POWER_DOWN;
 	}
 	mutex_unlock(s_ctrl->msm_sensor_mutex);
 	return rc;
