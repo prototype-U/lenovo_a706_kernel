@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2012-2013 The Linux Foundation. All Rights Reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -108,6 +108,19 @@ static int32_t msm_find_free_queue(void)
 			return i;
 	}
 	return -EINVAL;
+}
+
+void msm_setup_v4l2_event_queue(struct v4l2_fh *eventHandle,
+		      struct video_device *pvdev)
+{
+	v4l2_fh_init(eventHandle, pvdev);
+	v4l2_fh_add(eventHandle);
+}
+
+void msm_destroy_v4l2_event_queue(struct v4l2_fh *eventHandle)
+{
+	v4l2_fh_del(eventHandle);
+	v4l2_fh_exit(eventHandle);
 }
 
 uint32_t msm_camera_get_mctl_handle(void)
@@ -261,6 +274,7 @@ static void msm_cam_stop_hardware(struct msm_cam_v4l2_device *pcam)
 		if (rc < 0)
 			pr_err("mctl_release fails %d\n", rc);
 		pmctl->mctl_release = NULL;
+		pmctl->mctl_cmd = NULL;
 	}
 }
 
@@ -614,8 +628,8 @@ static int msm_server_proc_ctrl_cmd(struct msm_cam_v4l2_device *pcam,
 	uptr_cmd = (void __user *)ctrl->value;
 	uptr_value = (void __user *)tmp_cmd->value;
 	value_len = tmp_cmd->length;
-
-	D("%s: cmd type = %d, up1=0x%x, ulen1=%d, up2=0x%x, ulen2=%d\n",
+	if(tmp_cmd->type == 55)
+		printk("%s: cmd type = %d, up1=0x%x, ulen1=%d, up2=0x%x, ulen2=%d\n",
 		__func__, tmp_cmd->type, (uint32_t)uptr_cmd, cmd_len,
 		(uint32_t)uptr_value, tmp_cmd->length);
 
@@ -1940,8 +1954,10 @@ static int msm_open(struct file *f)
 		pmctl = msm_camera_get_mctl(pcam->mctl_handle);
 
 #ifdef CONFIG_MSM_MULTIMEDIA_USE_ION
-		pmctl->client = msm_ion_client_create(-1, "camera");
-		kref_init(&pmctl->refcount);
+		if (!pmctl->client) {
+			pmctl->client = msm_ion_client_create(-1, "camera");
+			kref_init(&pmctl->refcount);
+		}
 		ion_client_created = 1;
 #endif
 
@@ -1961,13 +1977,8 @@ static int msm_open(struct file *f)
 		}
 		pmctl->pcam_ptr = pcam;
 
-		rc = msm_setup_v4l2_event_queue(&pcam_inst->eventHandle,
+		msm_setup_v4l2_event_queue(&pcam_inst->eventHandle,
 			pcam->pvdev);
-		if (rc < 0) {
-			pr_err("%s: msm_setup_v4l2_event_queue failed %d",
-				__func__, rc);
-			goto mctl_event_q_setup_failed;
-		}
 	}
 	pcam_inst->vbqueue_initialized = 0;
 	rc = 0;
@@ -1990,12 +2001,13 @@ static int msm_open(struct file *f)
 	return rc;
 
 msm_send_open_server_failed:
-	v4l2_fh_del(&pcam_inst->eventHandle);
-	v4l2_fh_exit(&pcam_inst->eventHandle);
-mctl_event_q_setup_failed:
-	if (pmctl->mctl_release)
+	msm_destroy_v4l2_event_queue(&pcam_inst->eventHandle);
+	if (pmctl->mctl_release) {
 		if (pmctl->mctl_release(pmctl) < 0)
 			pr_err("%s: mctl_release failed\n", __func__);
+		pmctl->mctl_cmd = NULL;
+		pmctl->mctl_release = NULL;
+	}
 mctl_open_failed:
 	if (pcam->use_count == 1) {
 #ifdef CONFIG_MSM_MULTIMEDIA_USE_ION
@@ -2044,6 +2056,8 @@ int msm_cam_server_close_mctl_session(struct msm_cam_v4l2_device *pcam)
 		rc = pmctl->mctl_release(pmctl);
 		if (rc < 0)
 			pr_err("mctl_release fails %d\n", rc);
+		pmctl->mctl_release = NULL;
+		pmctl->mctl_cmd = NULL;
 	}
 
 #ifdef CONFIG_MSM_MULTIMEDIA_USE_ION
@@ -2166,6 +2180,7 @@ void msm_release_ion_client(struct kref *ref)
 		struct msm_cam_media_controller, refcount);
 	pr_err("%s Calling ion_client_destroy\n", __func__);
 	ion_client_destroy(mctl->client);
+	mctl->client = NULL;
 }
 
 static int msm_close(struct file *f)
@@ -2207,10 +2222,9 @@ static int msm_close(struct file *f)
 	D("%s index %d nodeid %d count %d\n", __func__, pcam_inst->my_index,
 		pcam->vnode_id, pcam->use_count);
 	pcam->dev_inst[pcam_inst->my_index] = NULL;
-	if (pcam_inst->my_index == 0) {
-		v4l2_fh_del(&pcam_inst->eventHandle);
-		v4l2_fh_exit(&pcam_inst->eventHandle);
-	}
+	if (pcam_inst->my_index == 0)
+		msm_destroy_v4l2_event_queue(&pcam_inst->eventHandle);
+
 	mutex_unlock(&pcam_inst->inst_lock);
 	mutex_destroy(&pcam_inst->inst_lock);
 	kfree(pcam_inst);
@@ -2228,6 +2242,8 @@ static int msm_close(struct file *f)
 			rc = pmctl->mctl_release(pmctl);
 			if (rc < 0)
 				pr_err("mctl_release fails %d\n", rc);
+			pmctl->mctl_release = NULL;
+			pmctl->mctl_cmd = NULL;
 		}
 
 #ifdef CONFIG_MSM_MULTIMEDIA_USE_ION
@@ -2742,12 +2758,6 @@ static long msm_ioctl_config(struct file *fp, unsigned int cmd,
 		rc = msm_v4l2_evt_notify(config_cam->p_mctl, cmd, arg);
 		break;
 
-	case MSM_CAM_IOCTL_SET_MEM_MAP_INFO:
-		if (copy_from_user(&config_cam->mem_map, (void __user *)arg,
-				sizeof(struct msm_mem_map_info)))
-			rc = -EINVAL;
-		break;
-
 	default:{
 		/* For the rest of config command, forward to media controller*/
 		struct msm_cam_media_controller *p_mctl = config_cam->p_mctl;
@@ -2764,39 +2774,6 @@ static long msm_ioctl_config(struct file *fp, unsigned int cmd,
 	return rc;
 }
 
-static int msm_mmap_config(struct file *fp, struct vm_area_struct *vma)
-{
-	struct msm_cam_config_dev *config_cam = fp->private_data;
-	int rc = 0;
-	int phyaddr;
-	int retval;
-	unsigned long size;
-
-	D("%s: phy_addr=0x%x", __func__, config_cam->mem_map.cookie);
-	phyaddr = (int)config_cam->mem_map.cookie;
-	if (!phyaddr) {
-		pr_err("%s: no physical memory to map", __func__);
-		return -EFAULT;
-	}
-	memset(&config_cam->mem_map, 0,
-		sizeof(struct msm_mem_map_info));
-	size = vma->vm_end - vma->vm_start;
-	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
-	retval = remap_pfn_range(vma, vma->vm_start,
-					phyaddr >> PAGE_SHIFT,
-					size, vma->vm_page_prot);
-	if (retval) {
-		pr_err("%s: remap failed, rc = %d",
-					__func__, retval);
-		rc = -ENOMEM;
-		goto end;
-	}
-	D("%s: phy_addr=0x%x: %08lx-%08lx, pgoff %08lx\n",
-			__func__, (uint32_t)phyaddr,
-			vma->vm_start, vma->vm_end, vma->vm_pgoff);
-end:
-	return rc;
-}
 
 static int msm_open_config(struct inode *inode, struct file *fp)
 {
@@ -2894,22 +2871,9 @@ static const struct file_operations msm_fops_config = {
 	.open  = msm_open_config,
 	.poll  = msm_poll_config,
 	.unlocked_ioctl = msm_ioctl_config,
-	.mmap	= msm_mmap_config,
 	.release = msm_close_config,
 };
 
-int msm_setup_v4l2_event_queue(struct v4l2_fh *eventHandle,
-	struct video_device *pvdev)
-{
-	int rc = 0;
-	/* v4l2_fh support */
-	spin_lock_init(&pvdev->fh_lock);
-	INIT_LIST_HEAD(&pvdev->fh_list);
-
-	v4l2_fh_init(eventHandle, pvdev);
-	v4l2_fh_add(eventHandle);
-	return rc;
-}
 
 static int msm_setup_config_dev(int node, char *device_name)
 {
@@ -2947,7 +2911,6 @@ static int msm_setup_config_dev(int node, char *device_name)
 		device_destroy(msm_class, devno);
 		goto config_setup_fail;
 	}
-
 	g_server_dev.config_info.config_dev_name[dev_num] =
 		dev_name(device_config);
 	D("%s Connected config device %s\n", __func__,
@@ -2960,14 +2923,12 @@ static int msm_setup_config_dev(int node, char *device_name)
 		goto config_setup_fail;
 	}
 
-	rc = msm_setup_v4l2_event_queue(
+    /* v4l2_fh support */
+	spin_lock_init(&config_cam->config_stat_event_queue.pvdev->fh_lock);
+	INIT_LIST_HEAD(&config_cam->config_stat_event_queue.pvdev->fh_list);
+	msm_setup_v4l2_event_queue(
 		&config_cam->config_stat_event_queue.eventHandle,
 		config_cam->config_stat_event_queue.pvdev);
-	if (rc < 0) {
-		pr_err("%s failed to initialize event queue\n", __func__);
-		video_device_release(config_cam->config_stat_event_queue.pvdev);
-		goto config_setup_fail;
-	}
 
 	return rc;
 
@@ -3200,15 +3161,10 @@ static int msm_setup_server_dev(struct platform_device *pdev)
 	/*initialize fake video device and event queue*/
 
 	g_server_dev.server_command_queue.pvdev = g_server_dev.video_dev;
-	rc = msm_setup_v4l2_event_queue(
+	msm_setup_v4l2_event_queue(
 		&g_server_dev.server_command_queue.eventHandle,
 		g_server_dev.server_command_queue.pvdev);
 
-	if (rc < 0) {
-		pr_err("%s failed to initialize event queue\n", __func__);
-		video_device_release(g_server_dev.server_command_queue.pvdev);
-		return rc;
-	}
 
 	for (i = 0; i < MAX_NUM_ACTIVE_CAMERA; i++) {
 		struct msm_cam_server_queue *queue;

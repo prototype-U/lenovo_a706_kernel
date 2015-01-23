@@ -173,6 +173,14 @@ static struct msm_camera_gpio_conf gpio_conf_sp0a28 = {
 };
 #endif
 
+#ifdef CONFIG_IMX111
+static struct msm_camera_gpio_conf gpio_conf_imx111 = {
+	.camera_off_table = camera_off_gpio_table,
+	.camera_on_table = camera_on_gpio_table,
+	.gpio_no_mux = 1,
+};
+#endif
+
 #ifdef CONFIG_OV5647_SUNNY_P5V02S
 static struct msm_camera_gpio_conf gpio_conf_ov5647_sunny_p5v02s = {
 	.camera_off_table = camera_off_gpio_table,
@@ -561,16 +569,51 @@ static struct msm_camera_sensor_info msm_camera_sensor_sp0a28_data = {
 };
 #endif
 
-#ifdef CONFIG_OV5647_SUNNY_P5V02S
-#if 0
-static struct msm_actuator_info msm_act_main_cam_7_info = {
+#ifdef CONFIG_IMX111
+static struct msm_actuator_info msm_act_main_cam_6_info_imx111 = {
 	.board_info     = &msm_act_main_cam_i2c_info,
-	.cam_name   = MSM_ACTUATOR_MAIN_CAM_7,
+	.cam_name   = MSM_ACTUATOR_MAIN_CAM_6,
 	.bus_id         = MSM_GSBI0_QUP_I2C_BUS_ID,
 	.vcm_pwd        = GPIO_NOT_CONFIGURED,
 	.vcm_enable     = 0,
 };
+static struct msm_camera_sensor_platform_info sensor_board_info_imx111 = {
+	.mount_angle = 90,
+	.cam_vreg = msm_cam_vreg,
+	.num_vreg = ARRAY_SIZE(msm_cam_vreg),
+	.gpio_conf = &gpio_conf_imx111,
+};
+static struct msm_camera_sensor_flash_src msm_flash_src_imx111 = {
+	.flash_sr_type = MSM_CAMERA_FLASH_SRC_LED1,
+	._fsrc.ext_driver_src.led_en = 49,
+	._fsrc.ext_driver_src.led_torch_en = 23,
+	._fsrc.ext_driver_src.led_flash_en = 32,
+	._fsrc.ext_driver_src.flash_id = MAM_CAMERA_EXT_LED_FLASH_LM3554,
+};
+static struct msm_camera_sensor_flash_data flash_imx111 = {
+#ifdef CONFIG_HW_ARMANI
+	.flash_type             = MSM_CAMERA_FLASH_LED,
+#else
+	.flash_type             = MSM_CAMERA_FLASH_NONE,
 #endif
+	.flash_src              = &msm_flash_src_imx111,
+};
+static struct msm_camera_sensor_info msm_camera_sensor_imx111_data = {
+	.sensor_name    = "imx111",
+	.sensor_reset_enable = 1,
+	.pmic_gpio_enable  = 0,
+	.sensor_reset   = GPIO_NOT_CONFIGURED,
+	.sensor_pwd     = GPIO_NOT_CONFIGURED,
+	.pdata          = &msm_camera_device_data_csi1[0],
+	.flash_data     = &flash_imx111,
+	.sensor_platform_info   = &sensor_board_info_imx111,
+	.csi_if                 = 1,
+	.camera_type	= BACK_CAMERA_2D,
+	.sensor_type = BAYER_SENSOR,
+	.actuator_info = &msm_act_main_cam_6_info_imx111,
+};
+#endif
+#ifdef CONFIG_OV5647_SUNNY_P5V02S
 static struct msm_actuator_info msm_act_main_cam_6_info = {
 	.board_info     = &msm_act_main_cam_i2c_info,
 	.cam_name   = MSM_ACTUATOR_MAIN_CAM_6,
@@ -896,6 +939,14 @@ static void __init msm7x27a_init_cam(void)
 		//msm_flash_src_ov5648_truly_cm8352._fsrc.ext_driver_src.led_en = GPIO_SKUD_CAM_LED_EN;
 		//msm_flash_src_ov5648_truly_cm8352._fsrc.ext_driver_src.led_flash_en = GPIO_SKUD_CAM_LED_FLASH_EN;
 #endif
+#ifdef CONFIG_IMX111
+		//Add SKUA specific settings, ov5647/Mp9v113 GPIOs
+		msm_camera_sensor_imx111_data.sensor_reset = QRD_SKUA_GPIO_CAM_5MP_RESET;
+		msm_camera_sensor_imx111_data.sensor_pwd = QRD_SKUA_GPIO_CAM_5MP_SHDN_EN;
+		msm_camera_sensor_imx111_data.vcm_pwd = 0;
+		msm_camera_sensor_imx111_data.vcm_enable = 0;
+
+#endif
 #ifdef CONFIG_OV5647_SUNNY_P5V02S
 		//Add SKUA specific settings, ov5647/Mp9v113 GPIOs
 		msm_camera_sensor_ov5647_sunny_p5v02s_data.sensor_reset = QRD_SKUA_GPIO_CAM_5MP_RESET;
@@ -1057,6 +1108,12 @@ static struct i2c_board_info i2c_camera_devices_skud[] = {
 	{
 		I2C_BOARD_INFO("sp0a28", 0x3d),
 		.platform_data = &msm_camera_sensor_sp0a28_data,
+	},
+#endif
+#ifdef CONFIG_IMX111
+	{
+		I2C_BOARD_INFO("imx111", 0x34),
+		.platform_data = &msm_camera_sensor_imx111_data,
 	},
 #endif
 #ifdef CONFIG_OV5647_SUNNY_P5V02S
